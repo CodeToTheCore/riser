@@ -1,4 +1,5 @@
 name: Backend CI
+# bootstrap: force GitHub to index workflows (2026-07-20)
 
 # Deliberately does NOT filter at the trigger level (on.push.paths /
 # on.pull_request.paths). If it did, this workflow would never run — and
