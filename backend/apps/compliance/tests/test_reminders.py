@@ -16,7 +16,11 @@ import pytest
 import time_machine
 
 from apps.compliance.models import Elevator, Escalation, Reminder
-from apps.compliance.reminders import REMINDER_COOLDOWN_DAYS, attempt_reminder
+from apps.compliance.reminders import (
+    REMINDER_COOLDOWN_DAYS,
+    ReminderOutcome,
+    attempt_reminder,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -51,44 +55,61 @@ class TestAttemptReminder:
     """Tests for :func:`apps.compliance.reminders.attempt_reminder`."""
 
     @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
-    def test_first_reminder_is_sent_and_logged(self, elevator: Elevator) -> None:
-        """The first reminder for an elevator is sent and appended to the log."""
-        result = attempt_reminder(elevator, channel="email")
+    def test_first_reminder_is_sent_and_logged(self, at_risk_elevator: Elevator) -> None:
+        """The first reminder for an at-risk elevator is sent and logged."""
+        result = attempt_reminder(at_risk_elevator, channel="email")
+        assert result.outcome is ReminderOutcome.SENT
         assert result.sent is True
         assert result.reminder is not None
         assert result.escalation is None
-        assert elevator.reminders.count() == 1
-        assert elevator.escalations.count() == 0
+        assert at_risk_elevator.reminders.count() == 1
+        assert at_risk_elevator.escalations.count() == 0
 
     @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
-    def test_second_reminder_within_cooldown_is_suppressed(self, elevator: Elevator) -> None:
+    def test_second_reminder_within_cooldown_is_suppressed(
+        self, at_risk_elevator: Elevator
+    ) -> None:
         """A second reminder inside the cooldown window is suppressed, not sent."""
-        attempt_reminder(elevator, channel="email")
-        result = attempt_reminder(elevator, channel="email")
+        attempt_reminder(at_risk_elevator, channel="email")
+        result = attempt_reminder(at_risk_elevator, channel="email")
+        assert result.outcome is ReminderOutcome.RATE_LIMITED
         assert result.sent is False
         assert result.reminder is None
         assert result.escalation is not None
         # The log still holds exactly one sent reminder; the suppressed
         # attempt is recorded on the escalation trail instead.
-        assert elevator.reminders.count() == 1
-        assert elevator.escalations.count() == 1
+        assert at_risk_elevator.reminders.count() == 1
+        assert at_risk_elevator.escalations.count() == 1
 
-    def test_reminder_allowed_again_after_cooldown(self, elevator: Elevator) -> None:
+    def test_reminder_allowed_again_after_cooldown(self, at_risk_elevator: Elevator) -> None:
         """Once the cooldown elapses, a new reminder is sent again."""
         start = datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC)
         with time_machine.travel(start):
-            attempt_reminder(elevator, channel="email")
+            attempt_reminder(at_risk_elevator, channel="email")
         later = start + datetime.timedelta(days=REMINDER_COOLDOWN_DAYS, seconds=1)
         with time_machine.travel(later):
-            result = attempt_reminder(elevator, channel="email")
+            result = attempt_reminder(at_risk_elevator, channel="email")
         assert result.sent is True
-        assert elevator.reminders.count() == 2
-        assert elevator.escalations.count() == 0
+        assert at_risk_elevator.reminders.count() == 2
+        assert at_risk_elevator.escalations.count() == 0
 
     @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
-    def test_next_allowed_at_reflects_cooldown(self, elevator: Elevator) -> None:
+    def test_next_allowed_at_reflects_cooldown(self, at_risk_elevator: Elevator) -> None:
         """A sent reminder reports the next allowed time one cooldown ahead."""
-        result = attempt_reminder(elevator, channel="email")
+        result = attempt_reminder(at_risk_elevator, channel="email")
         assert result.reminder is not None
+        assert result.next_allowed_at is not None
         expected = result.reminder.sent_at + datetime.timedelta(days=REMINDER_COOLDOWN_DAYS)
         assert result.next_allowed_at == expected
+
+    @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
+    def test_compliant_elevator_is_not_reminded(self, elevator: Elevator) -> None:
+        """A compliant elevator is never reminded, and nothing is logged."""
+        result = attempt_reminder(elevator, channel="email")
+        assert result.outcome is ReminderOutcome.NOT_AT_RISK
+        assert result.sent is False
+        assert result.reminder is None
+        assert result.escalation is None
+        assert result.next_allowed_at is None
+        assert elevator.reminders.count() == 0
+        assert elevator.escalations.count() == 0

@@ -187,36 +187,52 @@ class TestRemindAPI:
     """Tests for ``POST /api/elevators/<id>/remind/``."""
 
     @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
-    def test_remind_sends_and_logs(self, api_client: APIClient, elevator: Elevator) -> None:
-        """POST remind sends a reminder (201) and appends it to the log."""
-        response = api_client.post(f"/api/elevators/{elevator.pk}/remind/", {}, format="json")
+    def test_remind_sends_and_logs(self, api_client: APIClient, at_risk_elevator: Elevator) -> None:
+        """POST remind on an at-risk elevator sends a reminder (201) and logs it."""
+        response = api_client.post(
+            f"/api/elevators/{at_risk_elevator.pk}/remind/", {}, format="json"
+        )
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["sent"] is True
-        assert elevator.reminders.count() == 1
+        assert at_risk_elevator.reminders.count() == 1
 
     @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
     def test_remind_within_cooldown_is_rate_limited(
-        self, api_client: APIClient, elevator: Elevator
+        self, api_client: APIClient, at_risk_elevator: Elevator
     ) -> None:
         """A second remind inside the cooldown returns 429 and logs an escalation."""
-        api_client.post(f"/api/elevators/{elevator.pk}/remind/", {}, format="json")
-        response = api_client.post(f"/api/elevators/{elevator.pk}/remind/", {}, format="json")
+        url = f"/api/elevators/{at_risk_elevator.pk}/remind/"
+        api_client.post(url, {}, format="json")
+        response = api_client.post(url, {}, format="json")
         assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
         assert response.data["sent"] is False
         assert "next_allowed_at" in response.data
-        assert elevator.reminders.count() == 1
-        assert elevator.escalations.count() == 1
+        assert at_risk_elevator.reminders.count() == 1
+        assert at_risk_elevator.escalations.count() == 1
+
+    @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
+    def test_remind_compliant_elevator_returns_422(
+        self, api_client: APIClient, elevator: Elevator
+    ) -> None:
+        """Reminding a compliant elevator returns 422 and logs nothing."""
+        response = api_client.post(f"/api/elevators/{elevator.pk}/remind/", {}, format="json")
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.data["sent"] is False
+        assert elevator.reminders.count() == 0
+        assert elevator.escalations.count() == 0
 
     @time_machine.travel(datetime.datetime(2026, 7, 20, 12, 0, tzinfo=datetime.UTC))
     def test_remind_rejects_unknown_channel(
-        self, api_client: APIClient, elevator: Elevator
+        self, api_client: APIClient, at_risk_elevator: Elevator
     ) -> None:
         """An unrecognized channel is rejected with 400 and sends nothing."""
         response = api_client.post(
-            f"/api/elevators/{elevator.pk}/remind/", {"channel": "carrier-pigeon"}, format="json"
+            f"/api/elevators/{at_risk_elevator.pk}/remind/",
+            {"channel": "carrier-pigeon"},
+            format="json",
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert elevator.reminders.count() == 0
+        assert at_risk_elevator.reminders.count() == 0
 
     def test_remind_unknown_elevator_returns_404(self, api_client: APIClient) -> None:
         """Reminding a nonexistent elevator returns 404."""

@@ -10,7 +10,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.compliance.models import Building, Elevator, Reminder
-from apps.compliance.reminders import attempt_reminder
+from apps.compliance.reminders import ReminderOutcome, attempt_reminder
 from apps.compliance.serializers import (
     BuildingSerializer,
     ElevatorSerializer,
@@ -74,8 +74,9 @@ class ElevatorViewSet(viewsets.ModelViewSet[Elevator]):
         Returns:
             ``201 Created`` with the logged reminder when one is sent,
             ``429 Too Many Requests`` with the recorded escalation when the
-            attempt is rate-limited, or ``400 Bad Request`` if ``channel``
-            is not a recognized value.
+            attempt is rate-limited, ``422 Unprocessable Entity`` when the
+            elevator is compliant and no reminder is warranted, or
+            ``400 Bad Request`` if ``channel`` is not a recognized value.
         """
         elevator = self.get_object()
         channel = request.data.get("channel", Reminder.Channel.EMAIL)
@@ -89,8 +90,11 @@ class ElevatorViewSet(viewsets.ModelViewSet[Elevator]):
         result = attempt_reminder(elevator, channel=channel)
         body = {
             "sent": result.sent,
+            "outcome": result.outcome.value,
             "detail": result.detail,
-            "next_allowed_at": result.next_allowed_at.isoformat(),
+            "next_allowed_at": (
+                result.next_allowed_at.isoformat() if result.next_allowed_at is not None else None
+            ),
             "reminder": (
                 ReminderSerializer(result.reminder).data if result.reminder is not None else None
             ),
@@ -100,10 +104,12 @@ class ElevatorViewSet(viewsets.ModelViewSet[Elevator]):
                 else None
             ),
         }
-        response_status = (
-            status.HTTP_201_CREATED if result.sent else status.HTTP_429_TOO_MANY_REQUESTS
-        )
-        return Response(body, status=response_status)
+        status_by_outcome = {
+            ReminderOutcome.SENT: status.HTTP_201_CREATED,
+            ReminderOutcome.RATE_LIMITED: status.HTTP_429_TOO_MANY_REQUESTS,
+            ReminderOutcome.NOT_AT_RISK: status.HTTP_422_UNPROCESSABLE_ENTITY,
+        }
+        return Response(body, status=status_by_outcome[result.outcome])
 
 
 class LedgerListView(generics.ListAPIView[Elevator]):
