@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 
-from apps.compliance.models import Building, Elevator
+from apps.compliance.models import Building, Elevator, Escalation, Reminder
 from apps.compliance.services import calculate_due_date, calculate_status
 
 
@@ -86,3 +86,25 @@ class LedgerEntrySerializer(serializers.ModelSerializer[Elevator]):
         """
         due_date = calculate_due_date(obj.inspection_type, obj.last_inspection_date)
         return calculate_status(due_date).value
+
+
+class ReminderSerializer(serializers.ModelSerializer[Reminder]):
+    """Read-only serializer for a logged :class:`Reminder`."""
+
+    class Meta:
+        """Serializer configuration for ReminderSerializer."""
+
+        model = Reminder
+        fields = ["id", "elevator", "channel", "status", "sent_at"]
+        read_only_fields = fields
+
+
+class EscalationSerializer(serializers.ModelSerializer[Escalation]):
+    """Read-only serializer for a logged :class:`Escalation`."""
+
+    class Meta:
+        """Serializer configuration for EscalationSerializer."""
+
+        model = Escalation
+        fields = ["id", "elevator", "reason", "created_at"]
+        read_only_fields = fields

@@ -4,15 +4,19 @@ from collections.abc import Sequence
 from typing import Any
 
 from django.db.models import QuerySet
-from rest_framework import generics, viewsets
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.compliance.models import Building, Elevator
+from apps.compliance.models import Building, Elevator, Reminder
+from apps.compliance.reminders import attempt_reminder
 from apps.compliance.serializers import (
     BuildingSerializer,
     ElevatorSerializer,
+    EscalationSerializer,
     LedgerEntrySerializer,
+    ReminderSerializer,
 )
 from apps.compliance.services import Status, calculate_due_date, calculate_status
 
@@ -53,6 +57,53 @@ class ElevatorViewSet(viewsets.ModelViewSet[Elevator]):
         if building_id is not None:
             queryset = queryset.filter(building_id=building_id)
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def remind(self, request: Request, pk: str | None = None) -> Response:
+        """Send a rate-limited compliance reminder for a single elevator.
+
+        Accepts an optional ``channel`` in the request body (one of
+        ``"email"`` or ``"sms"``, defaulting to ``"email"``). Delegates
+        to :func:`apps.compliance.reminders.attempt_reminder`, which
+        suppresses reminders inside the cooldown window.
+
+        Args:
+            request: The incoming DRF request; may carry ``channel``.
+            pk: The primary key of the elevator, from the URL.
+
+        Returns:
+            ``201 Created`` with the logged reminder when one is sent,
+            ``429 Too Many Requests`` with the recorded escalation when the
+            attempt is rate-limited, or ``400 Bad Request`` if ``channel``
+            is not a recognized value.
+        """
+        elevator = self.get_object()
+        channel = request.data.get("channel", Reminder.Channel.EMAIL)
+        if channel not in Reminder.Channel.values:
+            valid = ", ".join(Reminder.Channel.values)
+            return Response(
+                {"channel": [f"Unrecognized channel {channel!r}; expected one of: {valid}."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = attempt_reminder(elevator, channel=channel)
+        body = {
+            "sent": result.sent,
+            "detail": result.detail,
+            "next_allowed_at": result.next_allowed_at.isoformat(),
+            "reminder": (
+                ReminderSerializer(result.reminder).data if result.reminder is not None else None
+            ),
+            "escalation": (
+                EscalationSerializer(result.escalation).data
+                if result.escalation is not None
+                else None
+            ),
+        }
+        response_status = (
+            status.HTTP_201_CREATED if result.sent else status.HTTP_429_TOO_MANY_REQUESTS
+        )
+        return Response(body, status=response_status)
 
 
 class LedgerListView(generics.ListAPIView[Elevator]):

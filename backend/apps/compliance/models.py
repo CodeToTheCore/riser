@@ -58,3 +58,67 @@ class Elevator(models.Model):
     def __str__(self) -> str:
         """Return a human-readable identifier including the device ID and building."""
         return f"{self.device_identifier} ({self.building.name})"
+
+
+class Reminder(models.Model):
+    """An append-only record of a compliance reminder sent for an elevator.
+
+    Reminders are never mutated after creation: each row is a permanent
+    audit-trail entry stating that, at ``sent_at``, a reminder about this
+    elevator's upcoming or overdue inspection was dispatched on
+    ``channel``. Rate limiting (see :mod:`apps.compliance.reminders`)
+    reads this log to decide whether a fresh reminder is allowed.
+    """
+
+    class Channel(models.TextChoices):
+        """The delivery channel a reminder was sent over."""
+
+        EMAIL = "email", "Email"
+        SMS = "sms", "SMS"
+
+    class Status(models.TextChoices):
+        """Delivery status of a reminder. Only sent reminders are logged."""
+
+        SENT = "sent", "Sent"
+
+    elevator = models.ForeignKey(Elevator, related_name="reminders", on_delete=models.CASCADE)
+    channel = models.CharField(max_length=16, choices=Channel.choices, default=Channel.EMAIL)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SENT)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Model metadata for Reminder."""
+
+        ordering = ["-sent_at"]
+
+    def __str__(self) -> str:
+        """Return a human-readable summary of the reminder."""
+        return (
+            f"Reminder for {self.elevator.device_identifier} "
+            f"via {self.channel} at {self.sent_at:%Y-%m-%d %H:%M}"
+        )
+
+
+class Escalation(models.Model):
+    """An append-only audit entry recording a suppressed reminder attempt.
+
+    When a reminder is requested for an elevator that is still inside its
+    cooldown window, no reminder is sent; instead an ``Escalation`` row is
+    written explaining why. This trail is the state store backing the
+    reminder rate limit and, like :class:`Reminder`, is never overwritten.
+    """
+
+    elevator = models.ForeignKey(Elevator, related_name="escalations", on_delete=models.CASCADE)
+    reason = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Model metadata for Escalation."""
+
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        """Return a human-readable summary of the escalation."""
+        return (
+            f"Escalation for {self.elevator.device_identifier} at {self.created_at:%Y-%m-%d %H:%M}"
+        )

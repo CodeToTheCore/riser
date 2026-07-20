@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from apps.compliance.models import Building, Elevator
+from apps.compliance.models import Building, Elevator, Escalation, Reminder
 
 
 @admin.register(Building)
@@ -32,3 +32,20 @@ class ElevatorAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
     ]
     list_filter = ["inspection_type", "building"]
     search_fields = ["device_identifier"]
+
+
+@admin.register(Reminder)
+class ReminderAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
+    """Admin configuration for :class:`Reminder` (read-only audit log)."""
+
+    list_display = ["elevator", "channel", "status", "sent_at"]
+    list_filter = ["channel", "status"]
+    readonly_fields = ["elevator", "channel", "status", "sent_at"]
+
+
+@admin.register(Escalation)
+class EscalationAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
+    """Admin configuration for :class:`Escalation` (read-only audit trail)."""
+
+    list_display = ["elevator", "reason", "created_at"]
+    readonly_fields = ["elevator", "reason", "created_at"]
