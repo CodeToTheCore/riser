@@ -42,6 +42,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_USER: ${{ github.event.pull_request.user.login }}
         run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping Slack notification."
+            exit 0
+          fi
           if [ "$PR_MERGED" = "true" ]; then
             EMOJI=":twisted_rightwards_arrows:"; VERB="merged"
           else
@@ -71,6 +75,10 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_USER: ${{ github.event.issue.user.login }}
         run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping Slack notification."
+            exit 0
+          fi
           if [ "$ISSUE_ACTION" = "closed" ]; then
             EMOJI=":white_check_mark:"; VERB="closed"
           else
@@ -98,6 +106,10 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_URL: ${{ github.event.release.html_url }}
         run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping Slack notification."
+            exit 0
+          fi
           TEXT=$(jq -n \
             --arg url "$RELEASE_URL" \
             --arg tag "$RELEASE_TAG" \
@@ -120,6 +132,10 @@ jobs:
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping Slack notification."
+            exit 0
+          fi
           SHORT_SHA=$(echo "$HEAD_SHA" | cut -c1-7)
           TEXT=$(jq -n \
             --arg name "$WORKFLOW_NAME" \
